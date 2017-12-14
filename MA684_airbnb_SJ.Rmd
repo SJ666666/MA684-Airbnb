@@ -6,8 +6,10 @@ output: pdf_document
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
 library(ggplot2)
+library(ggrepel)
+library(ggforce)
 library(tidyr)
 library(plyr)
 library(dplyr)
@@ -21,12 +23,14 @@ library(lme4)
 library(Matrix)
 library(knitr)
 library(sjPlot)
+library(gridExtra)
+library(scales)
 ```
 # Project overview and goal
-As a beginner who is new to airbnb, I really have no idea how to find an ideal place to stay on this platform. I looked up the beginner guides online and figured out that what the majority of potential houseguests care the most are price, location and host. How people choose airbnb should be an interesting angle for marketing. The project will focus on how to find a nice airbnb at a good price, in other words, to figure out the relationship bewteen price and factors that houseguests care the most. 
+As a beginner who is new to airbnb, I really have no idea how to find an ideal place to stay through this platform. I looked up the beginner guides online and figured out that what the majority of potential houseguests care the most are price, location and host. How people choose airbnb should be an interesting angle for marketing. The project will focus on how to find a nice airbnb at a good price, in other words, to figure out the relationship bewteen price and factors that houseguests care the most. 
 
 # Boston: data cleaning
-I choosed Boston, the city I am the most familiar with, for this project. The data includes listing information in Boston from January to November in 2016. The sample size is 36359 (1 rows was removed because of missing data).
+I choosed Boston, the city I am the most familiar with, for this project. The original datasets are seperate monthly surveys. The data includes listing information in Boston from January to November in 2016. The sample size is 36359 (1 rows was removed because of missing data and irrelevant variables are excluded).
 ```{r}
 boston1 <- read.csv("boston1.csv")
 boston2 <- read.csv("boston2.csv")
@@ -60,6 +64,7 @@ boston <- filter(boston, !is.na(host_id))
 
 # Word cloud
 Looking at the word clouds of top 40 words about listing in name (searching key words), summary and description, I figured out that houseguests pay the most attention of price, location and room type.
+
 ```{r}
 datatext<-read.csv("listings.csv",stringsAsFactors = FALSE)
 jeopCorpus <- Corpus(VectorSource(datatext$name))
@@ -73,8 +78,11 @@ jeopCorpus <- tm_map(jeopCorpus, stemDocument)
 jeopCorpus <- tm_map(jeopCorpus, removeWords, "bedroom")
 jeopCorpus <- tm_map(jeopCorpus, removeWords, "room")
 jeopCorpus <- tm_map(jeopCorpus, removeWords, "boston")
-pal<-brewer.pal(10,"Dark2")
-wordcloud(jeopCorpus, max.words = 40, random.order = FALSE,colors=pal)
+pal1<-brewer.pal(10,"Dark2")
+wordcloud(jeopCorpus, max.words = 40, random.order = FALSE,colors=pal1)
+```
+
+```{r}
 jeopCorpus <- Corpus(VectorSource(datatext$summary))
 jeopCorpus <- tm_map(jeopCorpus, PlainTextDocument)
 jeopCorpus <- tm_map(jeopCorpus, stripWhitespace)
@@ -86,8 +94,11 @@ jeopCorpus <- tm_map(jeopCorpus, stemDocument)
 jeopCorpus <- tm_map(jeopCorpus, removeWords, "bedroom")
 jeopCorpus <- tm_map(jeopCorpus, removeWords, "room")
 jeopCorpus <- tm_map(jeopCorpus, removeWords, "boston")
-pal<-brewer.pal(10,"Dark2")
-wordcloud(jeopCorpus, max.words = 40, random.order = FALSE,colors=pal)
+pal2<-brewer.pal(10,"Dark2")
+wordcloud(jeopCorpus, max.words = 40, random.order = FALSE,colors=pal2)
+```
+
+```{r}
 jeopCorpus <- Corpus(VectorSource(datatext$description))
 jeopCorpus <- tm_map(jeopCorpus, PlainTextDocument)
 jeopCorpus <- tm_map(jeopCorpus, stripWhitespace)
@@ -99,81 +110,158 @@ jeopCorpus <- tm_map(jeopCorpus, stemDocument)
 jeopCorpus <- tm_map(jeopCorpus, removeWords, "bedroom")
 jeopCorpus <- tm_map(jeopCorpus, removeWords, "room")
 jeopCorpus <- tm_map(jeopCorpus, removeWords, "boston")
-pal<-brewer.pal(10,"Dark2")
-wordcloud(jeopCorpus, max.words = 40, random.order = FALSE,colors=pal)
+pal3<-brewer.pal(10,"Dark2")
+wordcloud(jeopCorpus, max.words = 40, random.order = FALSE,colors=pal3)
 ```
 
 # Airbnb daily price in Boston
-Based on what discussed about, I am interested in how location(neighborhood), room type and season affect price.
+Based on what discussed about, I am interested in how location (neighborhood), room type and season affect price.
+
 ```{r}
 summary(boston$price)
 ```
-Only 769 out of 36359 samples have price over 500. Thus the following plots will only show samples with price under 500. The boxplots indicates that season (month) has very limited influence on price, while neighborhood and room type make relatively great influence on price.
+
+Only 769 out of 36359 samples have price over 500. Thus the following boxplots will only show samples with price under 500.
+
 ```{r}
-ggplot(boston, aes(x=month,y=price,group=month,colour=as.factor(month)))+
-  geom_boxplot()+ylim(0,500)+labs(colour="month")
-ggplot(boston, aes(x=neighborhood,y=price,group=neighborhood,colour=neighborhood))+
-  geom_boxplot()+ylim(0,500)+theme(axis.text.x = element_text(angle = 45), text=element_text(size = 8))+
-  labs(title="Airbnb price in Boston by neighborhood")
+ggplot(boston, aes(x=reorder(month,price,median),y=price,group=month,
+                   colour=as.factor(month)))+geom_boxplot()+ylim(0,500)+
+  labs(colour="month",title="Airbnb price in Boston by month", x="month")+
+  coord_flip()
+```
+
+The boxplots by month indicates that season (month) has very limited influence on price. It seems to have some seasonal change, but fluctuation within 10 dollars is probably not what really matters at this point of study. I also looked into the seasonal price change of every single room listed. The result shows that the price of the same room is quite stable. Therefore, I decide to disregard seasonal affect of the airbnb price in the first stage of my study.
+
+```{r}
+ggplot(boston, aes(x=reorder(neighborhood,price,median),y=price,group=neighborhood,
+                   colour=neighborhood))+
+  geom_boxplot()+ylim(0,500)+theme(text=element_text(size = 8),legend.position = "none")+
+  labs(title="Airbnb price in Boston by neighborhood", x="neighborhood")+coord_flip()
+```
+
+```{r}
 ggplot(boston, aes(x=room_type,y=price,group=room_type,colour=room_type))+
   geom_boxplot()+ylim(0,500)+labs(title="Airbnb price in Boston by room type")
 ```
 
+Compared to month, neighborhood and room type make relatively great influence on price. The boxplots indicates that there is very noticeable difference between airbnb prices in various neighborhood and those of distinct room types. I would like to dig deeper in these 2 indicators and get more detail about how neighborhood and room types affect airbnb price. 
+
 # Room type of airbnb in Boston
 There are 3 room types: entire home/apt, private room and shared room. Entire home/apt is the most popular room type (more than half of 36359 listings) and the average price of this type of room is more than twice of the other 2. Share room is only about 2% of all the listing airbnb and it has the lowest average price.
+
 ```{r}
-room_type <- count(boston, room_type)
-room_type
+room_type <- count(boston, vars=room_type)
+colnames(room_type) <- c("room_type", "freq")
+kable(room_type)
+
 price_by_roomtype <- sqldf("SELECT room_type, avg(price) as avg_price 
                            FROM boston
                            GROUP BY room_type")
-price_by_roomtype
-ggplot(room_type,aes(x="",y=n,fill=room_type))+geom_bar(stat = "identity")+
+kable(price_by_roomtype)
+```
+
+```{r}
+ggplot(room_type,aes(x="",y=freq,fill=room_type))+geom_bar(stat = "identity")+
   coord_polar("y")+labs(x="",y="",title="Pie Chart of Room Type of Airbnb in Boston")+
-  geom_text(aes(label=n))
+  geom_text(aes(label=percent(freq/sum(freq))),position=position_stack(vjust=0.5))
+```
+
+Entire home/apt is most popular room type. Almost 60% of houseguests choose entire home/apt. The pie chart also shows that people do not like shared room since only about 2% of them choose shared room.
+
+```{r}
 ggplot(price_by_roomtype, aes(x=room_type,y=avg_price, fill=room_type,colour=room_type))+
   geom_bar(stat = "identity")+geom_text(aes(label=round(avg_price, digits = 2)),vjust=-0.5)+
   theme(text=element_text(size = 10))+labs(title="Average airbnb price in Boston by room type")
 ```
 
+Although the price of entire home/apt is more than twice of the other 2, people are much more likely to choose entire home/apt, which implies that maybe price is not the most important factor that people consider for airbnb.
+
 # Neighborhood of airbnb in Boston
 There are 25 different neighborhoods with airbnb listings in boston. The triangle area on the south riverbank of Charles River, including Allston, Fenway, Back Bay and South Boston is the most popular place for airbnb. This area does not have the lowest price but has relatively more convenient transportation.
 ```{r}
 neighborhood <- count(boston, neighborhood)
-neighborhood
+colnames(neighborhood) <- c("neighborhood", "freq")
+kable(neighborhood)
+
 price_by_neighborhood <- sqldf("SELECT neighborhood, avg(price) as avg_price 
                            FROM boston
                            GROUP BY neighborhood")
-price_by_neighborhood
-ggplot(neighborhood,aes(x="",y=n,fill=neighborhood))+geom_bar(stat = "identity")+
-  coord_polar("y")+labs(x="",y="",title="Pie Chart of Neighborhood of Airbnb in Boston")+
-  theme(text=element_text(size = 10))
-ggplot(price_by_neighborhood, aes(x=neighborhood,y=avg_price, fill=neighborhood,
-                                  colour=neighborhood))+
-  geom_bar(stat = "identity")+theme(axis.text.x = element_text(angle = 90),
-                                    text=element_text(size = 8))+
-  geom_text(aes(label=round(avg_price, digits = 2)),vjust=-0.5,size=2,colour="black")+
-  labs(title="Average airbnb price in Boston by neighborhood")
+kable(price_by_neighborhood)
+
+```
+
+```{r}
+ggplot(neighborhood,aes(x=reorder(neighborhood,freq),y=freq,group=neighborhood,
+                        fill=neighborhood))+geom_bar(stat = "identity")+
+  labs(x="neighborhood",y="count",title="Density of Neighborhood of Airbnb in Boston")+
+  theme(text=element_text(size = 10),legend.position="none")+
+  geom_text(aes(label=freq))+coord_flip()
+```
+
+The barplot shows that houseguests do have preference of location. They are more likely to stay in the center of Boston.
+
+```{r}
+ggplot(price_by_neighborhood, aes(x=reorder(neighborhood,avg_price),y=avg_price,
+                                  fill=neighborhood,colour=neighborhood))+
+  geom_bar(stat = "identity")+theme(legend.position = "none",
+                                    text=element_text(size = 8))+labs(x="neighborhood")+
+  geom_text(aes(label=round(avg_price, digits = 2)),color="black")+
+  labs(title="Average airbnb price in Boston by neighborhood")+coord_flip()
+```
+
+The 4 most expensive neighborhood are all not popular among houseguests. However, relative high price (the 5th most expensive) does not hider Back Bay to be one of the most favorite (rank 4 in popularity). 
+
+```{r}
+boston$pricelevel[boston$neighborhood == "South Boston Waterfront"] <- 1
+boston$pricelevel[boston$neighborhood == "Leather District"] <- 1
+boston$pricelevel[boston$neighborhood == "Bay Village"] <- 1
+boston$pricelevel[boston$neighborhood == "Chinatown"] <- 1
+boston$pricelevel[boston$neighborhood == "Back Bay"] <- 1
+boston$pricelevel[boston$neighborhood == "Downtown"] <- 2
+boston$pricelevel[boston$neighborhood == "Charlestown"] <- 2
+boston$pricelevel[boston$neighborhood == "Beacon Hill"] <- 2
+boston$pricelevel[boston$neighborhood == "West End"] <- 2
+boston$pricelevel[boston$neighborhood == "Fenway"] <- 2
+boston$pricelevel[boston$neighborhood == "South End"] <- 3
+boston$pricelevel[boston$neighborhood == "South Boston"] <- 3
+boston$pricelevel[boston$neighborhood == "North End"] <- 3
+boston$pricelevel[boston$neighborhood == "Roxbury"] <- 3
+boston$pricelevel[boston$neighborhood == "Jamaica Plain"] <- 3
+boston$pricelevel[boston$neighborhood == "Mission Hill"] <- 4
+boston$pricelevel[boston$neighborhood == "Brighton"] <- 4
+boston$pricelevel[boston$neighborhood == "East Boston"] <- 4
+boston$pricelevel[boston$neighborhood == "West Roxbury"] <- 4
+boston$pricelevel[boston$neighborhood == "Allston"] <- 4
+boston$pricelevel[boston$neighborhood == "Longwood Medical Area"] <- 5
+boston$pricelevel[boston$neighborhood == "Roslindale"] <- 5
+boston$pricelevel[boston$neighborhood == "Hyde Park"] <- 5
+boston$pricelevel[boston$neighborhood == "Dorchester"] <- 5
+boston$pricelevel[boston$neighborhood == "Mattapan"] <- 5
 ```
 
 ```{r}
 mapboston <- (data.frame(
   x = boston$latitude,
   y = boston$longitude,
-  month = boston$month
+  pricelevel = boston$pricelevel
 ))
-qmplot(y, x, data = mapboston, colour = as.factor(month), size = I(0.1), darken = .1)+
-  labs(colour="month")
+qmplot(y, x, data = mapboston, colour = as.factor(pricelevel), size = I(0.1), darken = .1)+
+  labs(colour="pricelevel")
 ```
 
+The prices of different neighborhood are divided into 5 levels by 20 percentile (level 1 is the most expensive and level 5 is the cheapest). The center of Boston (south bank of the Charles River) is the most expensive, but it is the favorite location for houseguests (the color block is more condensed).
+
 # Overall satisfication of airbnb in Boston
-The listed airbnb in this data set is rated in a scale of 1 to 5 with 0.5 interval. The majority (9119 + 11224 = 20343) of 36359 samples is rated as 4.5 or 5 and 13203 samples, which is about 36%, are missing rating data. Thus, the overall satisfaction will be disregarded in the analysis because it is obviously not a representitive indicator.
+The listed airbnb in this data set is rated in a scale of 1 to 5 with 0.5 interval. The majority (9119 + 11224 = 20343) of 36359 samples is rated as 4.5 or 5 and 13203 samples, which is about 36%, are missing rating data. Thus, the overall satisfaction will be DISREGARDED in the analysis because it is obviously NOT a representitive indicator.
 ```{r}
 satisfaction <- count(boston, overall_satisfaction)
-satisfaction
+kable(satisfaction)
+
 ggplot(satisfaction, aes(x=factor(overall_satisfaction),y=n, 
                          fill=overall_satisfaction,colour=overall_satisfaction))+
-  geom_bar(stat = "identity")+geom_text(aes(label=n),vjust=-0.5)
+  geom_bar(stat = "identity")+geom_text(aes(label=n),vjust=-0.5)+
+  labs(title="Density of overall satisfication of airbnb in Boston", 
+       y="count", x="overall satisfaction")
 ```
 
 # Model Testing
@@ -182,47 +270,47 @@ Multilevel linear model was choosen after several trials of different models. Wh
 boston.model <- filter(boston, !is.na(accommodates) & !is.na(bedrooms) & !is.na(room_type))
 ```
 
-Model fit1, fit2, fit3 and fit4 are varing-intercept models with predictors. They are using different combination of 3 variables (reviews, accommodates and bedrooms) to see whether it is better to include any of the 3 variables in the model. It turns out that fit1 with all 3 variables is the best among these 4 models.
+Model fit1, fit2, fit3 and fit4 are varing-intercept models with predictors. They are using different combination of 3 variables (reviews, accommodates, bedrooms) and room type to see whether it is better to include any of the 4 variables in the model. The models also include neighborhood and host_id as 2 multilevel variables (one host could have more than 1 room listed and I am using host id as an indicator of service quality and the appearence of host_id decreases AIC by over 20000). It turns out that fit1 with all 4 variables is the best among these 4 models.
+
 ```{r}
-fit1 <- lmer(price ~ reviews + accommodates + bedrooms + 
-               (1|neighborhood) + (1|room_type), REML = FALSE, data=boston.model)
-summary(fit1)
+avg_reviews <- mean(boston$reviews)
+# center reviews by subracting mean
+boston.model$reviews <- boston.model$reviews-avg_reviews
 ```
 
 ```{r}
-fit2 <- lmer(price ~ reviews + bedrooms + 
-               (1|neighborhood) + (1|room_type), REML = FALSE, data=boston.model)
-summary(fit2)
+fit1 <- lmer(price ~ reviews + accommodates + (bedrooms-1) + room_type + 
+               (1|neighborhood) + (1|host_id), REML = FALSE, data=boston.model)
+kable(as.data.frame(fixef(fit1)))
 ```
 
 ```{r}
-fit3 <- lmer(price ~ reviews + accommodates + 
-               (1|neighborhood) + (1|room_type), REML = FALSE, data=boston.model)
-summary(fit3)
+fit2 <- lmer(price ~ reviews + accommodates + room_type + 
+               (1|neighborhood) + (1|host_id), REML = FALSE, data=boston.model)
 ```
 
 ```{r}
-fit4 <- lmer(price ~ accommodates + bedrooms + 
-               (1|neighborhood) + (1|room_type), REML = FALSE, data=boston.model)
-summary(fit4)
+fit3 <- lmer(price ~ reviews + (bedrooms-1) + room_type + 
+               (1|neighborhood) + (1|host_id), REML = FALSE, data=boston.model)
+```
+
+```{r}
+fit4 <- lmer(price ~ accommodates + (bedrooms-1) + room_type + 
+               (1|neighborhood) + (1|host_id), REML = FALSE, data=boston.model)
 ```
 
 ```{r}
 anova(fit1,fit2,fit3,fit4)
 ```
 
-# Model
-The final model choosen is a multilevel model varying both intercepts and slopes.
-$$y_{i}\sim\ N(\alpha_{j[i]}+\beta_{j[i]}x_{i},\ \sigma_{y}^2),\ for\ i=1,\dots,n$$
+Different from fit1, fit5 has mixed random effect and varying both slope and intercept. Since host_id has more than 1000 levels and it is messy to show the mixed effect of both neighborhood and host_id, fit5 only includes mixed random effect of neighborhood to illustrate how mixed effect works. The final model will also includes host_id as a multilevel random variable.
+
 ```{r}
-fit5 <- lmer(price ~ reviews + accommodates + bedrooms +
-               (1+reviews + accommodates + bedrooms|neighborhood) +
-               (1+reviews + accommodates + bedrooms|room_type),
+fit5 <- lmer(price ~ reviews + accommodates + (bedrooms-1) + room_type + 
+               (1 + reviews + accommodates + (bedrooms-1) + room_type|neighborhood), 
              REML = FALSE, data=boston.model)
-summary(fit5)
 ```
 
-As showen below, the coefficients of fitted model are quite significant, especially the number of rooms. Reviews (the number of total reviews of a specific room, which is used to predict the popularity of the this room) has much less influence than the other 2 variables. In general, with everything else remains the same, 1 increase in accommodates will lead to 4.2 higher daily price. One more room in airbnb will increase the daily price by 25.6 on average.
 ```{r}
 kable(as.data.frame(fixef(fit5)))
 ```
@@ -234,11 +322,25 @@ sjp.lmer(fit5, type = "re.qq")
 ```{r}
 sjp.lmer(fit5, y.offset = .4)
 ```
-The model has 2 multilevel predictors: neighborhood and room type. As shown in the graphs above, the influence of variables varies by different levels of predictors. For example, bedrooms increases the price more with the same change in neighborhood with higher price, such as Back bay.
+The model has q multilevel predictor: neighborhood. As shown in the graphs above, the influence of variables varies by different levels of the predictor. For example, bedrooms increases the price more with the same change in neighborhood with higher price, such as Back bay.
 
 ```{r}
 plot(fit5, ylim = c(-300,300), xlim = c(0,500))
 ```
 
+# Model
+The final model choosen is a multilevel model varying both intercepts and slopes.
+$$y_{i}\sim\ N(\alpha_{j[i]}+\beta_{j[i]}x_{i},\ \sigma_{y}^2),\ for\ i=1,\dots,n$$
+
+```{r}
+fit.final <- lmer(price ~ reviews + accommodates + (bedrooms-1) + room_type + 
+                    (1+reviews+accommodates+(bedrooms-1)+room_type|neighborhood) + (1|host_id), 
+                  REML = FALSE, data=boston.model)
+summary(fit.final)
+kable(as.data.frame(fixef(fit.final)))
+```
+
+The "reviews" is scaled by subtracting the mean and "bedrooms" is shifted to the left by 1. As showen below, the coefficients of fitted model are quite significant, especially the number of rooms and room type. Reviews (the number of total reviews of a specific room, which is used to predict the popularity of the this room) has much less influence than the other 3 variables. In general, with everything else remains the same, 1 increase in accommodates will lead to 8.73 higher daily price. One more room in airbnb will increase the daily price by 39.13. On average, an entire home/apt will be 62.39 dollars more expensive than a private room and 81.51 than a shared room.
+
 # Discussion and concerns
-The original data has lots of limitation, such as missing guest_id, which is necessary to do analysis of houseguests' review of rooms they have stayed in. Although the final model is better than the other testing models, it has huge AIC. Digging deeper with help of data other than the original data is definitely what I need to do after this first step of research. More variables that will make the model better has to be determined.
+The original data has lots of limitation, such as missing guest_id, which is necessary to do analysis of houseguests' review of rooms they have stayed in. Although the final model is better than the other testing models, it has huge AIC. Digging deeper with help of data other than the original data is definitely what I need to do after this first step of research. More variables that will make the model better has to be determined. More importantly, I am insterested in the factors, such as transportance, convinience, sightseeing, food and shopping center, that make the neighborhood popular. That is to say, I will need more data, not limited to just airbnb data, to build up a scale or maybe scoring system to measure the popularity of a specific location.
